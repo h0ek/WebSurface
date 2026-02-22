@@ -80,3 +80,15 @@ If you see: `Potential origin exposure detected`
 - CDN detection is heuristic (“cdnish” signals can be false positives/negatives).
 - Some origins are intentionally hidden (WAF challenges, geo blocks, auth gates).
 - Don’t treat findings as confirmed exposure without manual validation.
+
+## Tools Used
+WebSurface is only an orchestrator. All credit goes to the original authors of these amazing tools:
+
+- [subfinder](https://github.com/projectdiscovery/subfinder)
+- [dnsx](https://github.com/projectdiscovery/dnsx)
+- [httpx](https://github.com/projectdiscovery/httpx)
+- [naabu](https://github.com/projectdiscovery/naabu)
+- [nmap](https://github.com/nmap/nmap)
+- [gowitness](https://github.com/sensepost/gowitness)
+
+Huge thanks to all tool authors.
