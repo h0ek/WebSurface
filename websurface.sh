@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.2"
+VERSION="0.3"
 TOOL_NAME="WebSurface"
 BANNER_SHOWN=0
 
@@ -77,7 +77,7 @@ DOMAINS="$run_dir/domains.txt"
 
 HTTPX_MC="200,204,301,302,307,308,400,401,403,404,405,500,502,503"
 CHALLENGE_RE='just a moment|attention required|access denied|request blocked|are you human|captcha|ddos|checking your browser'
-SHOT_SC_RE='^(200|301|302|401|403)$'
+SHOT_SC_RE='^(200|301|302|307|308|401|403)$'
 CDN_CNAME_RE='cloudflare|cloudfront|fastly|akamai|edgesuite|edgekey|azureedge|azurefd|cdn77|stackpathdns|incapdns|impervadns|sucuri|stackpath|vercel-dns|netlify|pantheonsite|wpengine|siteground|nginxcdn|cachefly|gcore|gcdn'
 
 line(){ printf "%s\n" "$*"; }
@@ -138,7 +138,7 @@ line ""
 # ---------------- [1] subfinder + dedup (+ root domains) ----------------
 S1="$(now_s)"
 set +e
-run_quiet "[1/7] Subdomain enum (subfinder)..." \
+run_quiet "[1/8] Subdomain enum (subfinder)..." \
   "$run_dir/logs/subfinder.out" "$run_dir/logs/subfinder.err" \
   subfinder -dL "$DOMAINS" -all -recursive -silent -o "$run_dir/subdomains/subfinder.txt"
 S1RC=$?
@@ -164,7 +164,7 @@ line ""
 # ---------------- [2] dnsx resolve + host/ip (A+AAAA) ----------------
 S2="$(now_s)"
 set +e
-run_quiet "[2/7] DNS resolve (dnsx A+AAAA)..." \
+run_quiet "[2/8] DNS resolve (dnsx A+AAAA)..." \
   "$run_dir/logs/dnsx.out" "$run_dir/logs/dnsx.err" \
   dnsx -l "$run_dir/subdomains/subdomains_all.txt" -a -aaaa -j -silent -o "$run_dir/dns/dns.json"
 S2RC=$?
@@ -209,7 +209,7 @@ grep -E '^[0-9a-fA-F:]+$' "$run_dir/scan/ips_all.txt" > "$run_dir/scan/ips_v6.tx
 
 # ---------------- [3] cloudflare classification (v4+v6) ----------------
 S3="$(now_s)"
-line "[3/7] Cloudflare classification..."
+line "[3/8] Cloudflare classification..."
 
 : > "$run_dir/cf/cf_ipv4.txt"
 : > "$run_dir/cf/cf_ipv6.txt"
@@ -254,7 +254,7 @@ line ""
 
 # ---------------- [4] httpx verify + wide/shots/rejected + triage.csv ----------------
 S4="$(now_s)"
-line "[4/7] HTTP probe (find alive web services + collect IP/CDN hints)..."
+line "[4/8] HTTP probe (find alive web services + collect IP/CDN hints)..."
 awk '{print "http://" $0 "\nhttps://" $0 }' "$run_dir/dns/subdomains_resolved.txt" > "$run_dir/scan/http_urls.txt"
 HTTP_TARGETS="$(count_lines "$run_dir/scan/http_urls.txt")"
 line "    url targets (http+https):   $HTTP_TARGETS"
@@ -420,7 +420,7 @@ line ""
 
 # ---------------- [5] origin port scan (naabu top100, no 80/443) ----------------
 S5="$(now_s)"
-line "[5/7] Port scan on strict candidate IPs (naabu top100; excluding 80/443)..."
+line "[5/8] Port scan on strict candidate IPs (naabu top100; excluding 80/443)..."
 
 : > "$run_dir/scan/origin_ip_open_v4.txt"
 : > "$run_dir/scan/origin_ip_open_v6.txt"
@@ -474,7 +474,7 @@ line ""
 
 # ---------------- [6] nmap service scan + summary ----------------
 S6="$(now_s)"
-line "[6/7] Nmap service scan..."
+line "[6/8] Nmap service scan..."
 NMAP_TARGETS_V4=0
 NMAP_TARGETS_V6=0
 NMAP_SUMMARY=""
@@ -593,13 +593,13 @@ line ""
 
 # ---------------- [7] gowitness ----------------
 S7="$(now_s)"
-line "[7/7] Gowitness..."
+line "[7/8] Gowitness..."
 mkdir -p "$run_dir/gowitness/screenshots"
 GOW_DB="$run_dir/gowitness/gowitness.sqlite3"
 
 set +e
-run_quiet "Gowitness scan..." \
-  "$run_dir/logs/gowitness.out" "$run_dir/logs/gowitness.err" \
+run_quiet "Gowitness shots..." \
+  "$run_dir/logs/gowitness_shots.out" "$run_dir/logs/gowitness_shots.err" \
   gowitness scan file -f "$run_dir/httpx/alive_urls_shots.txt" \
   -t "$GOW_THREADS" -T 60 \
   --screenshot-path "$run_dir/gowitness/screenshots" \
@@ -613,6 +613,40 @@ S7E="$(now_s)"
 line "    gowitness rc:        $S7RC"
 line "    screenshots saved:   $SS_COUNT"
 line "    time:                $(fmt_time $(( S7E - S7 )))"
+line ""
+
+# ---------------- [8] gowitness (rejected double-check) ----------------
+S8="$(now_s)"
+line "[8/8] Gowitness (rejected double-check)..."
+
+REJ_IN="$run_dir/httpx/alive_urls_rejected.txt"
+mkdir -p "$run_dir/gowitness_rejected/screenshots"
+GOW_DB_REJ="$run_dir/gowitness_rejected/gowitness_rejected.sqlite3"
+
+S8RC=0
+SS_REJ_COUNT=0
+
+if [[ -s "$REJ_IN" ]]; then
+  set +e
+  run_quiet "Gowitness rejected..." \
+    "$run_dir/logs/gowitness_rejected.out" "$run_dir/logs/gowitness_rejected.err" \
+    gowitness scan file -f "$REJ_IN" \
+      -t "$GOW_THREADS" -T 60 \
+      --screenshot-path "$run_dir/gowitness_rejected/screenshots" \
+      --write-db --write-db-uri "sqlite://$GOW_DB_REJ" \
+      --write-none
+  S8RC=$?
+  set -e
+
+  SS_REJ_COUNT="$(find "$run_dir/gowitness_rejected/screenshots" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) 2>/dev/null | wc -l | tr -d ' ')"
+else
+  line "    skipped: rejected list empty"
+fi
+
+S8E="$(now_s)"
+line "    gowitness rejected rc: $S8RC"
+line "    rejected screenshots:  $SS_REJ_COUNT"
+line "    time:                 $(fmt_time $(( S8E - S8 )))"
 line ""
 
 RUN_END="$(now_s)"
@@ -641,6 +675,7 @@ line "  httpx:               $(rc_status "$S4RC")"
 line "  naabu IPv4:          $(rc_status "$S5RC4")"
 line "  naabu IPv6:          $(rc_status "$S5RC6")"
 line "  gowitness:           $(rc_status "$S7RC")"
+line "  gowitness rejected:  $(rc_status "$S8RC")"
 line ""
 
 line "Targets:"
@@ -705,7 +740,11 @@ line "  6) nmap input (IP ports):   $run_dir/nmap/targets_v4.map            (and
 line "  6b) nmap summary:           $NMAP_SUMMARY"
 line "  7) screenshots dir:         $run_dir/gowitness/screenshots"
 line "  7b) gowitness DB:           $GOW_DB"
+line "  8) screenshots rejected:    $run_dir/gowitness_rejected/screenshots"
+line "  8b) gowitness rejected DB:  $GOW_DB_REJ"
 line ""
 
-line "Run report:"
+line "Run report (shots):"
 line "  gowitness report server --host 127.0.0.1 --port 7171 --db-uri sqlite://$GOW_DB --screenshot-path $run_dir/gowitness/screenshots"
+line "Run report (rejected):"
+line "  gowitness report server --host 127.0.0.1 --port 7172 --db-uri sqlite://$GOW_DB_REJ --screenshot-path $run_dir/gowitness_rejected/screenshots"
