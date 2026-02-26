@@ -59,12 +59,39 @@ run_YYYYMMDD_HHMMSS/
 
 Run local report UI:
 
+Clean (filtered, production-ready)
+
 ```
 gowitness report server \
   --host 127.0.0.1 --port 7171 \
   --db-uri sqlite:///PATH/TO/run_*/gowitness/gowitness.sqlite3 \
   --screenshot-path PATH/TO/run_*/gowitness/screenshots
 ```
+
+Opens: http://127.0.0.1:7171
+
+Contains:
+
+- Status 200/301/302/307/308/401/403
+- No obvious challenge/botwall titles
+- “Clean” screenshots only
+
+Rejected (double-check / noise / botwall)
+
+```
+gowitness report server \
+  --host 127.0.0.1 --port 7172 \
+  --db-uri sqlite:///PATH/TO/run_*/gowitness_rejected/gowitness_rejected.sqlite3 \
+  --screenshot-path PATH/TO/run_*/gowitness_rejected/screenshots
+```
+
+Opens: http://127.0.0.1:7172
+
+Contains:
+
+- Challenge pages
+- Non-standard status codes
+- Edge cases filtered out from clean report
 
 ## How to read the verdict
 
