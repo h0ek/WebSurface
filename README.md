@@ -1,74 +1,73 @@
 # WebSurface
 
-Web attack surface discovery + origin exposure triage (Cloudflare/CDN aware).
+Web attack surface discovery and origin exposure triage (Cloudflare/CDN aware).
 
-WebSurface discovers subdomains, resolves A/AAAA records, verifies HTTP/HTTPS services per hostname and IP, and identifies potential non-CDN backend candidates. It can scan explicitly authorized candidate IPs for additional TCP services and optionally capture screenshots.
+Use only on assets you own or have explicit authorization to test.
 
-Use only on assets you own or have explicit authorization to test. A DNS record, shared hosting address or CDN relationship does not establish authorization for direct IP scanning.
+## Features
 
-## What it does (pipeline)
-
-1. **Subdomain discovery** (passive) – `subfinder`, restricted to the supplied root domains and their subdomains.
-2. **DNS resolution** – `dnsx` A, AAAA and CNAME records.
-3. **Cloudflare classification** – official IPv4/IPv6 ranges; unavailable or invalid ranges produce an unknown classification.
-4. **HTTP verification** – pinned hostname/IP pairs, preserving Host and TLS SNI. Uses ProjectDiscovery `httpx` when its pinned JSON input passes a local preflight; otherwise uses `curl`. Redirect destinations are recorded but never followed. HTTP error responses are also service evidence.
-5. **Candidate selection** – verified HTTP responses on IPs outside known Cloudflare ranges, without observed CDN signals. Screenshot quality does not affect candidate selection.
-6. **Port scan** – `naabu` against explicitly authorized candidates only, using the TCP top-100 set with 80/443 excluded before scanning.
-7. **Service fingerprinting** – `nmap -sV`, with per-target timeouts and output validation.
-8. **Optional visual triage** – `gowitness` screenshots and SQLite databases, with separate clean and rejected URL lists.
+- Passive subdomain discovery and DNS resolution (A, AAAA, CNAME).
+- HTTP/HTTPS verification per hostname and IP, preserving Host and TLS SNI.
+- Cloudflare and CDN classification with potential backend identification.
+- TCP port scanning and service fingerprinting on explicitly authorized candidate IPs.
+- Optional screenshots and SQLite reports.
+- CSV, JSON and text reports with execution status and tool logs.
 
 ## Requirements
 
-- Linux, Bash, Python 3.9+ and `curl`.
-- `subfinder`, `dnsx` in `$PATH`.
-- ProjectDiscovery `httpx` with pinned JSON target support is optional. Older versions use the curl fallback, which does not provide Wappalyzer technology fingerprints.
-- `naabu` and `nmap` for direct IP port scanning.
-- Gowitness v3 and a compatible Chromium browser for optional screenshots.
+- Linux, Bash and Python 3.9+.
+- [subfinder](https://github.com/projectdiscovery/subfinder), [dnsx](https://github.com/projectdiscovery/dnsx) and [curl](https://curl.se/).
+- Optional: [httpx](https://github.com/projectdiscovery/httpx) with pinned JSON target support; otherwise curl is used without technology fingerprinting.
+- Port scanning: [naabu](https://github.com/projectdiscovery/naabu) and [nmap](https://github.com/nmap/nmap).
+- Screenshots: [gowitness](https://github.com/sensepost/gowitness) v3 and a compatible Chromium browser.
+
+Tools must be available in `$PATH`.
 
 ## Usage
 
-`domains.txt` contains one root domain per line. Blank lines and lines beginning with `#` are ignored. Enter domain names only, without URLs or wildcard prefixes.
+Clone the repository:
+
+```bash
+git clone https://github.com/h0ek/WebSurface.git
+cd WebSurface
+```
+
+Provide one root domain per line in `domains.txt` (no URLs or wildcards).
 
 ```bash
 ./websurface.sh -i domains.txt
 ```
 
-Without an explicit IP allowlist, WebSurface only probes publicly routable DNS addresses using the in-scope virtual host. It does not run Naabu or Nmap.
-
-For an authorized IP-level assessment, provide an additional file containing only IP addresses or CIDRs covered by the rules of engagement:
+By default, HTTP/HTTPS probes are limited to publicly routable DNS addresses of in-scope hosts. Redirects are recorded but not followed. Direct port scanning requires an explicit allowlist of authorized IP addresses or CIDRs, one per line:
 
 ```bash
 ./websurface.sh -i domains.txt -a authorized-ips.txt
 ```
 
-When `-a` is supplied, HTTP probes are also restricted to those IPs. The allowlist never expands discovery to arbitrary addresses within a CIDR; only addresses associated with in-scope DNS names are considered. Loopback, link-local, multicast, unspecified and reserved addresses are excluded.
+The allowlist also restricts HTTP probes and does not expand discovery beyond DNS-derived addresses.
 
 | Option | Description |
 | --- | --- |
 | `-i FILE` | Root domains file (required) |
-| `-a FILE` | Explicitly authorized IP addresses/CIDRs |
+| `-a FILE` | Authorized IP/CIDR file |
 | `-t N` | Gowitness threads (default: 30) |
 | `-r N` | Naabu rate (default: 2000) |
 | `-n N` | Parallel Nmap jobs (default: 4) |
-| `-o DIR` | New output directory; must not already exist |
-| `--screenshots` | Enable Gowitness under the conditions below |
-| `--browser-egress-restricted` | Acknowledge externally enforced browser scope restrictions |
-| `--version` | Print version |
+| `-o DIR` | Output directory (must not exist) |
+| `--screenshots` | Enable screenshots |
+| `--browser-egress-restricted` | Acknowledge external browser egress restrictions |
+| `--version` | Show version |
 | `-h` | Show help |
 
-The default output directory is `run_YYYYMMDD_HHMMSS_microseconds/` next to the script. Files and directories are created with a restrictive umask. Proxy environment variables are not inherited by probes.
-
 ### Screenshots
-
-Browser traffic is disabled by default. A browser may follow redirects, load third-party resources, or resolve hosts again. Only enable screenshots in an environment where an independent network policy restricts browser egress to the authorized destinations and ports. The acknowledgement flag does not configure or verify a firewall.
 
 ```bash
 ./websurface.sh -i domains.txt -a authorized-ips.txt --screenshots --browser-egress-restricted
 ```
 
-Known out-of-scope redirect sources are excluded from screenshot inputs. Screenshots are URL-level visual evidence, not proof of a response from a particular pinned IP.
+Screenshots require an external network policy restricting browser traffic to authorized destinations and ports. The acknowledgement flag does not configure or verify that policy. Browser screenshots are URL-level evidence, not verification of a pinned IP.
 
-Run the local report UI against an existing screenshot database:
+Open an existing Gowitness report locally:
 
 ```bash
 gowitness report server --host 127.0.0.1 --port 7171 \
@@ -76,62 +75,32 @@ gowitness report server --host 127.0.0.1 --port 7171 \
   --screenshot-path /absolute/path/to/run/gowitness/screenshots
 ```
 
-For rejected pages, use `gowitness_rejected/gowitness_rejected.sqlite3`, its `screenshots/` directory and a different local port. The clean list contains selected HTTP statuses without obvious challenge titles; rejected pages may include errors, access-denied pages or challenges.
+For rejected pages, use the corresponding database and screenshot directory under `gowitness_rejected/` and a different port.
 
-## Key outputs
+## Output
 
-- `summary.txt` / `summary.json` – execution status, counts, issues and evidence-based verdict.
-- `subdomains/subdomains_all.txt` and `subdomains/rejected.txt` – in-scope hosts and rejected discovery results.
-- `dns/dns.json` and `dns/host_ip.csv` – raw DNS results and host-to-IP mappings.
-- `httpx/httpx.json` – raw HTTP probe results (including curl fallback records when used).
-- `httpx/verified.jsonl` and `httpx/triage.csv` – verified HTTP responses and enrichment.
-- `httpx/unreported.jsonl` – targets missing a success/failure result.
-- `httpx/redirects_out_of_scope.txt` – initial URLs with an observed out-of-scope redirect.
-- `scan/unknown_cf_ips_v4.txt` / `scan/unknown_cf_ips_v6.txt` – IPs with unavailable Cloudflare classification.
-- `scan/origin_ips_strict_v4.txt` / `scan/origin_ips_strict_v6.txt` – heuristic candidate IPs.
-- `scan/origin_ips_authorized_v4.txt` / `scan/origin_ips_authorized_v6.txt` – candidates eligible for port scanning.
-- `scan/origin_scope_unapproved.txt` and `scan/http_scope_skipped.csv` – candidates and mappings withheld from active steps.
-- `scan/origin_ip_open_v4.txt` / `scan/origin_ip_open_v6.txt` – additional open TCP endpoints, with bracketed IPv6 notation.
-- `nmap/targets_v4.map` / `nmap/targets_v6.map` and `nmap/summary.txt` – service scan inputs and reports.
-- `gowitness/` and `gowitness_rejected/` – optional screenshots and databases.
-- `logs/` – tool diagnostics and local HTTP preflight output.
+Each run creates a new `run_YYYYMMDD_HHMMSS_microseconds/` directory by default.
 
-## How to read the verdict
+| Path | Content |
+| --- | --- |
+| `summary.txt`, `summary.json` | Execution status and findings |
+| `subdomains/`, `dns/`, `cf/` | Discovery, DNS and Cloudflare data |
+| `httpx/triage.csv`, `httpx/verified.jsonl` | Verified HTTP responses |
+| `scan/origin_ips_strict_v4.txt`, `scan/origin_ips_strict_v6.txt` | Potential backend IPs |
+| `scan/origin_ip_open_v4.txt`, `scan/origin_ip_open_v6.txt` | Additional open TCP endpoints |
+| `nmap/summary.txt` | Service fingerprints |
+| `gowitness/`, `gowitness_rejected/` | Optional screenshots and databases |
+| `logs/` | Tool diagnostics |
 
-- Exit `0`: requested stages completed, or were intentionally skipped because they had no eligible targets. This does not establish that exposure is absent.
-- Exit `2`: invalid input, missing dependency or unusable output directory.
-- Exit `3`: incomplete run or failed stage; inspect `summary.json` and logs before drawing conclusions.
-- Exit `130`: interrupted run.
+Exit codes: `0` completed, `2` invalid input or missing prerequisites, `3` incomplete assessment, `130` interrupted.
 
-Candidate IPs are unique addresses with verified HTTP service evidence and no observed CDN indicators. Open endpoints are IP/port pairs. An additional open port on a candidate is not confirmation that the public application is exposed directly or that a CDN/WAF is bypassable.
+## Limitations
 
-## Notes / limitations
+- CDN classification is heuristic; unavailable Cloudflare ranges are classified as unknown.
+- HTTP verification covers ports 80 and 443. The curl fallback accepts untrusted TLS certificates for discovery.
+- TCP scanning uses the selected top-100 port set excluding 80/443; it is not a full TCP or UDP assessment. Nmap performs service fingerprinting without NSE scripts.
+- Candidate IPs and open ports do not prove origin exposure or CDN/WAF bypass. Validate findings manually. A completed run does not rule out exposure.
 
-- CDN detection is heuristic. Shared IPs, hosting providers and unobserved CDN indicators require manual review.
-- HTTP verification is limited to HTTP/80 and HTTPS/443 for DNS-discovered host/IP pairs; redirects are not followed. HTTP probe failures are not evidence that a service does not exist.
-- The curl fallback accepts untrusted TLS certificates for discovery; it does not validate TLS trust or provide Wappalyzer technology fingerprints.
-- The TCP port scan excludes 80/443 and is not a full port or UDP scan. Nmap fingerprints selected services without NSE scripts.
-- An upstream tool may return success with incomplete results. WebSurface checks reported errors and available output, but cannot prove full coverage.
-- Browser egress restrictions must be enforced outside WebSurface.
-- Validate findings manually against the actual authorized service, ownership and security architecture.
+## License
 
-## Tests
-
-```bash
-bash -n websurface.sh
-python3 -B -m unittest discover -s tests -v
-```
-
-The regression suite uses mocked external tools and a local loopback HTTP server. It does not scan external targets.
-
-## Tools Used
-
-WebSurface is an orchestrator. All credit goes to the original tool authors:
-
-- [subfinder](https://github.com/projectdiscovery/subfinder)
-- [dnsx](https://github.com/projectdiscovery/dnsx)
-- [httpx](https://github.com/projectdiscovery/httpx)
-- [curl](https://curl.se/)
-- [naabu](https://github.com/projectdiscovery/naabu)
-- [nmap](https://github.com/nmap/nmap)
-- [gowitness](https://github.com/sensepost/gowitness)
+[MIT](LICENSE)
